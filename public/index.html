@@ -746,17 +746,16 @@ function debugScroll() {
 function onScreen(rows) {
   liveRows = rows;
   renderInto(liveEl, rows);
-  // Another attached client (e.g. a real herdr TUI on the desktop) can
-  // reclaim the runtime's shared size without us knowing -- fitCols is
-  // only "the width we last asked for", not "the width it actually is
-  // now". If the runtime's actual rendered width has drifted from that,
-  // negotiateCols()'s own change-detection would otherwise think nothing
-  // needs asking for and silently do nothing forever, even after a
-  // reload. Drop the stale cache so the next call re-asks for real.
-  if (!awaitingRewrap && fitCols) {
-    const actualW = screenW(rows);
-    if (actualW && Math.abs(actualW - fitCols) >= 2) fitCols = 0;
-  }
+  // REMOVED: a drift-detection heuristic used to live here (comparing
+  // screenW(rows) against fitCols and resetting the cache on mismatch).
+  // Server logs proved it actively harmful: ordinary short lines routinely
+  // measure narrower than the real column count, so it was constantly
+  // "detecting drift" that wasn't real, defeating negotiateCols()'s
+  // throttle and triggering a fresh kill+respawn of the hidden client on
+  // almost every screen update (confirmed: the same size respawning
+  // several times within under a second). visibilitychange -> sendFit()
+  // is the correct fix for the actual "reclaim on refocus" scenario and
+  // doesn't have this failure mode.
   fitFont();
   if (atBottom) pinBottom();
   debugScroll(); // TEMP — remove once the vertical-scroll bug is diagnosed
