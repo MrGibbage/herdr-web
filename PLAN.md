@@ -1,5 +1,30 @@
 # Plan: forking herdr-web for real push notifications
 
+## Abandoned in favor of Collie (2026-08-21)
+
+After a full day fixing real bugs in this fork (nested-herdr config, PATH resolution for the hidden
+resize-driving client, foreground-reclaim caching, a resize-storm regression), the underlying
+constraint never went away: herdr has exactly one shared runtime size per pane, following whichever
+attached client is "foreground." Every fix here was a better way to *fight* that constraint, not a
+way to remove it.
+
+Found `AltanS/collie` — same Tailscale-only, single-user, loopback-bind trust model as this fork —
+and its own bug tracker independently confirmed the root cause as a genuine upstream herdr
+limitation (`herdr#1709`: "pane stuck narrow — Herdr applies pane geometry only while a desktop
+client is attached"), not something this fork could have engineered around better. Collie's answer:
+don't resize the shared PTY at all — take herdr's rendered grid at whatever width the desktop
+happens to be and re-wrap it client-side for the phone. That sidesteps the entire bug class this
+plan spent a day on, by construction.
+
+Switched to Collie (`herdr plugin install AltanS/collie`) on docker-server. Push notifications were
+rebuilt there using its own built-in Web Push support rather than ported from here. This repo and
+its GitHub remote (`MrGibbage/herdr-web`) are kept as-is, unmaintained, as the record of what was
+tried and why — revisit only if a future herdr release fixes `herdr#1709` upstream and the
+shared-PTY-size math changes. See docker-server's Holocron page
+`artificial-intelligence/claude-mcp/collie-mobile-access.md` for the full writeup.
+
+---
+
 ## Font-size / horizontal-scroll bug — fixed (2026-08-21)
 
 Skip's actual complaint: even at the smallest font size (A− control),
