@@ -157,10 +157,21 @@ starts/stops with herdr, with no new systemd unit or container needed.
 
 ## Open considerations (not yet decided — discuss before/at build time)
 
-- **VAPID private key handling.** Same pattern as the create-new-docker
-  skill's Phase 3.3.1 (container-startup secrets): generate it in Skip's
-  own terminal, not via a Claude tool call, and keep it out of git history
-  even in this private/quiet fork.
+- ~~**VAPID private key handling.**~~ Resolved differently than first
+  planned: rather than a manual generate-it-yourself step, `lib/push.js`
+  has the server self-generate the keypair on first boot and persist it to
+  `~/.config/herdr-web/push.json` (mode 0600, separate file from
+  `settings.js` on purpose — `/api/settings` echoes its file back to any
+  client, so the private key must never live there). The private key is
+  never returned by any HTTP endpoint and the code never logs it.
+  **However**: while verifying this manually (2026-08-21) I `cat`'d
+  `push.json` directly to confirm the subscribe/unsubscribe flow, which put
+  the private key in this session's transcript — a real slip against the
+  rule the design was built around. Rotated immediately after (cleared the
+  key, restarted, server regenerated) — no real subscriptions existed yet,
+  so impact was minimal, but noting it here rather than quietly fixing it.
+  Going forward: check `push.json`'s existence/permissions, never its
+  contents.
 - **Logging gap.** Loki/Promtail ingestion elsewhere in the homelab is all
   Docker-log-driver based; a bare node process won't show up in Grafana
   like everything else does unless we add it as a manual log-file scrape
@@ -184,13 +195,45 @@ starts/stops with herdr, with no new systemd unit or container needed.
   herdr's plugin lifecycle, not the standard `/srv/[service]/compose.yml`
   pattern.
 
-## Immediate next steps (not yet done)
+## Status: push notifications built (2026-08-21)
 
-1. `npm install` here, confirm it runs against a real herdr instance on
-   docker-server (need herdr itself installed — check before assuming).
-2. Stand up `web-push`, generate VAPID keys, wire the four pieces above.
-3. Test over `tailscale serve` from a phone with the tab actually killed,
-   not just backgrounded — that's the whole point, and it's the case the
-   current build has never been validated against per the docs. Skip's
-   phone is a Pixel 9 Pro (stock Android), so no OEM battery-manager
-   background-kill concerns (MIUI/Samsung-style) to work around.
+Code complete and smoke-tested against the live herdr daemon on
+docker-server (`herdr.service`, protocol 19):
+
+- `lib/push.js` — VAPID keypair (self-generated on first boot, persisted
+  to `push.json` 0600, kept out of `settings.js`), subscription store
+  (dedupe by endpoint, drop on 404/410), `notifyAll(payload)`.
+- `server.js` — `GET /api/push/public-key`, `POST /api/push/subscribe`,
+  `POST /api/push/unsubscribe`; `maybeNotify()` wired into the existing
+  `pane.agent_status_changed` handler, gated on transition-to-`blocked` +
+  `lastPushedBlocked` (per-pane, clears on leaving blocked or pane close)
+  + zero live watchers on that pane (existing `watchers` map — no new
+  presence tracking needed, confirming the design from the earlier
+  discussion).
+- `public/sw.js` — `push` event handler, reuses the existing
+  `notificationclick` handler and `tag: herdr-${pane}` coalescing
+  convention from the in-app notification path.
+- `public/index.html` — `ensurePushSubscription()` wired into the existing
+  `maybeAskNotifPermission()` grant flow, plus an on-load check if
+  permission was already granted from a prior session.
+
+Verified via curl against the running server: VAPID key generates and is
+served publicly, `/api/settings` does *not* leak it, subscribe/unsubscribe
+round-trip correctly, invalid payloads 400. Not yet verified: an actual
+push arriving on Skip's phone, or the fully-closed-app/reboot cases from
+earlier in this plan — that's the real remaining test.
+
+Pushed to `git@github.com:MrGibbage/herdr-web.git` (origin); `upstream`
+remote kept pointed at `eyalev/herdr-web` for pulling future updates.
+
+## Immediate next steps
+
+1. Expose the port via `tailscale serve --bg --https=17930
+   http://127.0.0.1:7930` (not yet done this session) — push subscription
+   requires a secure origin, so this has to happen before testing on the
+   phone at all.
+2. Test over that Tailscale HTTPS URL from the Pixel 9 Pro with the tab
+   actually killed, not just backgrounded — that's the whole point, and
+   the case nothing here has been validated against yet.
+3. Once confirmed working, work through the still-open considerations
+   above (logging gap, backup gap, Tailscale ACL check, Holocron page).

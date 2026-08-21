@@ -13,6 +13,7 @@ const preview = require('./lib/preview');
 const cast = require('./lib/cast');
 const settings = require('./lib/settings');
 const dirs = require('./lib/dirs');
+const push = require('./lib/push');
 
 const sizeDriver = new SizeDriver();
 
@@ -24,6 +25,9 @@ const PORT = Number(process.env.HERDR_WEB_PORT || 7930);
 // a reverse proxy, or set HERDR_WEB_BIND=0.0.0.0 if you know what you're doing.
 const BIND = process.env.HERDR_WEB_BIND || '127.0.0.1';
 const POLL_MS = 300;
+// VAPID contact URL sent to push services as an abuse contact — a URL, not
+// a personal email, on purpose.
+const VAPID_SUBJECT = process.env.HERDR_WEB_VAPID_SUBJECT || 'https://pelorus.org';
 
 function jlog(level, event, extra = {}) {
   console.log(JSON.stringify({ ts: new Date().toISOString(), level, module: 'server', event, ...extra }));
@@ -115,9 +119,11 @@ function resubscribe(paneIds) {
       if (event === 'pane.agent_status_changed') {
         broadcast({ type: 'agent_status', ...data });
         scheduleRefresh(event);
+        maybeNotify(data);
       } else if (event === 'pane.scroll_changed') {
         pokeWatcher(data.pane_id);
       } else {
+        if (event === 'pane.closed' || event === 'pane.exited') lastPushedBlocked.delete(data.pane_id);
         scheduleRefresh(event);
       }
     },
@@ -136,6 +142,33 @@ function resubscribe(paneIds) {
 // ---------------------------------------------------------------------------
 
 const watchers = new Map(); // pane_id -> {clients:Set<ws>, timer, lastText, inFlight}
+
+// ---------------------------------------------------------------------------
+// Push notifications — only for a pane genuinely blocked with nobody
+// watching. herdr's agent_status_changed already fires on transition, not
+// continuously, but lastPushedBlocked is cheap defense-in-depth against a
+// repeat event re-notifying for the same still-blocked episode; it clears
+// once the pane leaves blocked (or closes), so the next block re-notifies.
+// ---------------------------------------------------------------------------
+
+const lastPushedBlocked = new Set(); // pane_ids we've already pushed for, still blocked
+
+function maybeNotify(data) {
+  const { pane_id, agent_status, agent, workspace_id } = data;
+  if (agent_status !== 'blocked') {
+    lastPushedBlocked.delete(pane_id);
+    return;
+  }
+  if (lastPushedBlocked.has(pane_id)) return;
+  const w = watchers.get(pane_id);
+  if (w && w.clients.size > 0) return; // live client has it open — in-app toast already covers this
+  lastPushedBlocked.add(pane_id);
+  const ws = (state.snapshot?.workspaces || []).find((x) => x.workspace_id === workspace_id);
+  const title = agent ? `${agent} needs you` : 'Agent needs you';
+  const body = ws?.label ? `${ws.label} — blocked, waiting on approval` : 'Blocked, waiting on approval';
+  push.notifyAll({ title, body, pane: pane_id })
+    .catch((e) => jlog('error', 'push-failed', { pane: pane_id, error: e.message }));
+}
 
 function pokeWatcher(paneId) {
   const w = watchers.get(paneId);
@@ -257,6 +290,28 @@ app.put('/api/settings', (req, res) => {
   const saved = settings.save(patch);
   jlog('info', 'settings-saved', { agentCommand: saved.agentCommand });
   res.json(saved);
+});
+
+// ---------------------------------------------------------------------------
+// Push notifications
+// ---------------------------------------------------------------------------
+
+app.get('/api/push/public-key', (_req, res) => {
+  const key = push.getPublicKey();
+  if (!key) return res.status(503).json({ error: 'vapid not ready' });
+  res.json({ publicKey: key });
+});
+
+app.post('/api/push/subscribe', (req, res) => {
+  if (!push.addSubscription(req.body)) return res.status(400).json({ error: 'invalid subscription' });
+  jlog('info', 'push-subscribed');
+  res.json({ ok: true });
+});
+
+app.post('/api/push/unsubscribe', (req, res) => {
+  const { endpoint } = req.body || {};
+  if (endpoint) push.removeSubscription(endpoint);
+  res.json({ ok: true });
 });
 
 app.get('/api/ports', async (_req, res) => {
@@ -401,6 +456,7 @@ wss.on('connection', (ws) => {
 (async () => {
   const pong = await herdr.ensureServer();
   jlog('info', 'herdr-ready', { version: pong.version, protocol: pong.protocol });
+  push.ensureVapid(VAPID_SUBJECT); // generates+persists a keypair on first run; never logged
   await refreshSnapshot('startup');
   server.listen(PORT, BIND, () => jlog('info', 'listening', { port: PORT, bind: BIND }));
 })().catch((e) => {
