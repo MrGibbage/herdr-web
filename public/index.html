@@ -734,6 +734,17 @@ function fetchHistSoon(delay = 1500) {
 function onScreen(rows) {
   liveRows = rows;
   renderInto(liveEl, rows);
+  // Another attached client (e.g. a real herdr TUI on the desktop) can
+  // reclaim the runtime's shared size without us knowing -- fitCols is
+  // only "the width we last asked for", not "the width it actually is
+  // now". If the runtime's actual rendered width has drifted from that,
+  // negotiateCols()'s own change-detection would otherwise think nothing
+  // needs asking for and silently do nothing forever, even after a
+  // reload. Drop the stale cache so the next call re-asks for real.
+  if (!awaitingRewrap && fitCols) {
+    const actualW = screenW(rows);
+    if (actualW && Math.abs(actualW - fitCols) >= 2) fitCols = 0;
+  }
   fitFont();
   if (atBottom) pinBottom();
   // This screen is the first one drawn at the new width, so the cached history
