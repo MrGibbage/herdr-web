@@ -266,12 +266,40 @@ undecided:
   only if we want access from outside Tailscale" — that's now the actual
   situation, not a hypothetical).
 
-## Immediate next steps
+## Validated end-to-end (2026-08-21)
 
-1. Decide the exposure path above.
-2. Push a real notification end to end from the Pixel 9 Pro with the tab
-   actually killed, not just backgrounded — that's the whole point, and
-   the case nothing here has been validated against yet.
-3. Once confirmed working, work through the remaining open considerations
-   above (logging gap, backup gap, Holocron page). The Tailscale ACL
-   check is moot if Tailscale isn't the exposure path after all.
+Real device test, app fully swiped away + phone screen off, using
+`herdr pane report-agent` to synthetically flip this session's own pane
+(`wB:pB`) to `blocked` (real permission-prompt tests were impossible —
+this session runs in bypass-permissions mode, so `rm` never actually
+paused for approval; report-agent exercises the identical
+`pane.agent_status_changed` → `maybeNotify()` → `push.notifyAll()` path a
+real block would, just from a different origin):
+
+- Test 1 (before `push-sent`/`push-failed` logging existed): no visible
+  result either way — this is what led to adding that logging, a real gap
+  the first test exposed.
+- Test 2: notification landed — "Claude needs you", screen off, app
+  closed. Chrome's Android client showed it behind a **"possible
+  spam?"** wrapper (unsubscribe/show buttons) rather than a normal
+  notification — this is a known Chrome heuristic for a push origin with
+  no prior reputation, not a bug in this code. Skip tapped Show → Always
+  Allow → Report as not spam, which should let future notifications
+  render normally.
+- Test 3: correctly produced **no** notification — Skip's phone had
+  reconnected (a live WebSocket on that pane, visible in `ws-open` with
+  no matching `ws-close`), so the presence gate suppressed the push
+  exactly as designed. Confirms the "don't push if someone's already
+  watching" logic works, not just the "push if nobody's watching" half.
+
+Full pipeline confirmed working: blocked-transition detection, presence
+gating, VAPID-signed send via `/etc/homelab/herdr-web.env`, delivery
+through Chrome's push service, service worker `push` handler, and
+`showNotification()`.
+
+## Remaining open considerations
+
+Logging gap (partially addressed — push send outcomes now logged;
+general server logs still aren't in Loki), backup gap, Holocron page.
+The Tailscale ACL check now applies for real, since Tailscale ended up
+being the actual exposure path.
