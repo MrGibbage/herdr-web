@@ -157,21 +157,23 @@ starts/stops with herdr, with no new systemd unit or container needed.
 
 ## Open considerations (not yet decided — discuss before/at build time)
 
-- ~~**VAPID private key handling.**~~ Resolved differently than first
-  planned: rather than a manual generate-it-yourself step, `lib/push.js`
-  has the server self-generate the keypair on first boot and persist it to
-  `~/.config/herdr-web/push.json` (mode 0600, separate file from
-  `settings.js` on purpose — `/api/settings` echoes its file back to any
-  client, so the private key must never live there). The private key is
-  never returned by any HTTP endpoint and the code never logs it.
-  **However**: while verifying this manually (2026-08-21) I `cat`'d
-  `push.json` directly to confirm the subscribe/unsubscribe flow, which put
-  the private key in this session's transcript — a real slip against the
-  rule the design was built around. Rotated immediately after (cleared the
-  key, restarted, server regenerated) — no real subscriptions existed yet,
-  so impact was minimal, but noting it here rather than quietly fixing it.
-  Going forward: check `push.json`'s existence/permissions, never its
-  contents.
+- ~~**VAPID private key handling.**~~ Resolved twice. First pass:
+  `lib/push.js` self-generated the keypair into `~/.config/herdr-web/`
+  (0600). While verifying that manually I `cat`'d the file to confirm the
+  subscribe/unsubscribe flow, which put the private key straight into this
+  session's transcript — a real slip. Rotated immediately (no real
+  subscriptions existed yet, so impact was minimal). Skip then asked for
+  it to follow the same pattern as every other homelab secret instead, so
+  **second pass (2026-08-21, current)**: `lib/push.js` no longer generates
+  or persists any key material — it reads
+  `HERDR_WEB_VAPID_PUBLIC_KEY`/`HERDR_WEB_VAPID_PRIVATE_KEY` from the
+  environment, sourced by `scripts/plugin-start.sh` from
+  `/etc/homelab/herdr-web.env` (root:docker, 0640) before `node` starts —
+  identical to the `env_file:` pattern the create-new-docker skill uses
+  for containerized services, just sourced by a shell script instead of
+  Docker. Push is cleanly disabled (503, no-op) until that file exists.
+  The old local file was deleted, unread, once the new path was verified
+  working.
 - **Logging gap.** Loki/Promtail ingestion elsewhere in the homelab is all
   Docker-log-driver based; a bare node process won't show up in Grafana
   like everything else does unless we add it as a manual log-file scrape
@@ -226,14 +228,39 @@ earlier in this plan — that's the real remaining test.
 Pushed to `git@github.com:MrGibbage/herdr-web.git` (origin); `upstream`
 remote kept pointed at `eyalev/herdr-web` for pulling future updates.
 
+## Blocker found: docker-server has no local Tailscale client (2026-08-21)
+
+The whole exposure plan assumed `tailscale serve` on docker-server, per
+upstream's README. Checked directly: no `tailscale` binary, no
+`tailscaled` service — confirms the earlier memory that docker-server,
+smavm, and ganymede all dropped their own Tailscale clients around
+2026-08-12 (OPNsense now handles Tailscale as an *exit node* for LAN
+egress, which is a different capability from exposing a LAN host *into*
+the tailnet). `tailscale serve` cannot run here as-is. Real options, still
+undecided:
+
+- Reinstall a Tailscale client on docker-server as a scoped exception —
+  gets back to the original plan exactly, but reverses a deliberate
+  recent infra decision and needs a real reason to carve out an
+  exception.
+- Route through the existing Caddy LAN pattern
+  (`herdr-web.pelorus.org` → `192.168.0.231:7930`, real HTTPS cert, no
+  new exposure) — works immediately with zero new infra, but only
+  reachable on the home network, not "from anywhere" the way mobile
+  access implies.
+- CF Tunnel + CF Access — reachable from anywhere, but reintroduces a
+  third party in the path and would need CF Access's SSO/OTP to stand in
+  for the auth herdr-web itself doesn't have, which changes the trust
+  model from what was decided earlier ("Auth beyond Tailscale... revisit
+  only if we want access from outside Tailscale" — that's now the actual
+  situation, not a hypothetical).
+
 ## Immediate next steps
 
-1. Expose the port via `tailscale serve --bg --https=17930
-   http://127.0.0.1:7930` (not yet done this session) — push subscription
-   requires a secure origin, so this has to happen before testing on the
-   phone at all.
-2. Test over that Tailscale HTTPS URL from the Pixel 9 Pro with the tab
+1. Decide the exposure path above.
+2. Push a real notification end to end from the Pixel 9 Pro with the tab
    actually killed, not just backgrounded — that's the whole point, and
    the case nothing here has been validated against yet.
-3. Once confirmed working, work through the still-open considerations
-   above (logging gap, backup gap, Tailscale ACL check, Holocron page).
+3. Once confirmed working, work through the remaining open considerations
+   above (logging gap, backup gap, Holocron page). The Tailscale ACL
+   check is moot if Tailscale isn't the exposure path after all.
