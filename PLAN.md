@@ -38,13 +38,64 @@ panes still needed horizontal scrolling on the phone. Root cause was
 Both fixes were necessary — `allow_nested` alone wasn't sufficient (the
 PATH bug would have kept killing it regardless), and the PATH fix alone
 wouldn't have helped either (nested rejection would have kicked in next).
-Not yet re-verified from Skip's actual phone that this resolves the
-horizontal-scroll complaint end to end — that's the next thing to check.
 `shrinkToFit()`'s guard (`if (fontSize) return`, which fully disables the
 font-safety-net once a size is manually chosen) is still a latent
 secondary issue noted from the original diagnosis, deliberately left
-alone for now since the primary fix may make it moot — revisit only if
-scrolling persists after this.
+alone since the primary fix may make it moot — revisit only if scrolling
+persists.
+
+## Round 2: foreground contention (2026-08-21, same day)
+
+First phone retest partially worked and surfaced a real second bug.
+Skip's report: touched the phone, wrapped perfectly, no horizontal
+scroll (correct). Vertical scroll also didn't move (separately concerning
+— see below, not yet root-caused). Then he moved his desktop mouse, and
+the phone view un-wrapped — his real desktop herdr TUI reclaiming the
+runtime's shared frame size, which is an architecture reality (herdr has
+exactly one shared runtime size, following whichever attached client is
+"foreground" — the docs already flag this: "if someone attaches a real
+herdr TUI at a bigger terminal, panes grow"). Going back to the phone,
+and even refreshing, never re-wrapped.
+
+Reproduced the *exact* sequence synthetically (spawn a real narrow hidden
+client, spawn a competing wide `herdr` client via node-pty to simulate
+the desktop reclaiming foreground, kill the competitor, then re-request
+the original narrow size the way a reconnecting phone would) and found
+two independent stale caches, both treating "the size we last asked for"
+as ground truth with no way to notice a third party changed it:
+
+- **Client** (`index.html`): `fitCols` never got compared against the
+  *actual* rendered width, only against what it remembered asking for —
+  fixed by comparing `screenW(rows)` (already used elsewhere in this file
+  for a similar purpose) against `fitCols` on every incoming screen and
+  dropping the cache on drift.
+- **Server** (`size-driver.js`): `setPaneSize()` skipped acting whenever
+  the requested size matched its own cache. First attempt: keep resizing
+  the *existing* process, adding a same-size "nudge" (resize to cols+1
+  then back) to force a real SIGWINCH — tested live, and it produced a
+  garbage result (226×66, matching neither the requested size nor
+  anything else asked for), clearly racing with herdr's own foreground
+  arbitration in a way not worth reverse-engineering further. Replaced
+  with kill+respawn: always kill the existing hidden client and attach a
+  completely fresh one. A new attachment reliably reclaims foreground
+  (it's the case herdr is built around), and respawning a small Rust
+  binary on a debounced, human-triggered event is cheap. Fixed a real
+  race this introduced along the way — the old process's `onExit`
+  closure captured `this.proc` instead of its own `proc` variable, so an
+  async exit event landing after a newer process was already spawned
+  would wrongly null out the *new* process's reference.
+
+Verified via the full synthetic repro: narrow (42 wide) → wide competitor
+takes over and **stays stuck wide** even after the competitor dies
+(matching Skip's report exactly, unlike an earlier test run where it
+auto-reverted) → re-request narrow → back to 42, confirmed via `herdr
+pane layout`, no leaked processes.
+
+**Not yet re-verified from Skip's actual phone.** Also still open: the
+vertical-scroll-didn't-move report from the same test session — not yet
+root-caused, and may or may not be related to the mid-transition wrapped
+state at the time. Ask Skip to retest both after this fix, since fixing
+the width issue may change what's observable about the scroll issue too.
 
 Source: https://github.com/eyalev/herdr-web, cloned into this dir 2026-08-20.
 Upstream is MIT, single dev, small (~3,050 lines total: `server.js` (409) +
