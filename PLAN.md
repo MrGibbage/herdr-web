@@ -1,5 +1,51 @@
 # Plan: forking herdr-web for real push notifications
 
+## Font-size / horizontal-scroll bug — fixed (2026-08-21)
+
+Skip's actual complaint: even at the smallest font size (A− control),
+panes still needed horizontal scrolling on the phone. Root cause was
+**not** what it first looked like:
+
+- First hypothesis (wrong-ish): `size-driver.js`'s hidden resize-driving
+  `herdr` client kept crashing (`client-exited exitCode 1` every ~2s,
+  forever) because this session itself runs inside a herdr pane, and
+  herdr refuses to launch nested by default
+  (`experimental.allow_nested`, default `false` — see
+  https://herdr.dev/docs/config-reference/). Enabled it in
+  `~/.config/herdr/config.toml` (that file is **not** part of this repo —
+  noted here since there's nowhere else it'd be remembered). This was a
+  real, legitimate fix, but turned out to be secondary.
+- **Actual blocker**: after enabling `allow_nested`, the crash loop
+  continued identically. Reproducing `size-driver.js`'s exact
+  `pty.spawn()` call standalone (capturing output it normally discards)
+  showed the real error: `execvp(3) failed.: No such file or directory`.
+  `herdr` is installed at `~/.local/bin/herdr`, which is on an
+  interactive shell's PATH but **not** on the minimal PATH a process
+  started via the plugin startup hook inherits (confirmed via
+  `/proc/<pid>/environ`: no `~/.local/bin` in `PATH`). `size-driver.js`
+  spawned the bare command name, so every attempt failed instantly with
+  the exact same exit code (1) as the nested-herdr rejection would have
+  — the two failure modes were indistinguishable from the logs alone,
+  which is why the first hypothesis looked plausible and had to be ruled
+  out by actually reproducing the spawn rather than trusting the log
+  pattern.
+- Fixed in `lib/size-driver.js`: resolve `herdr`'s real path
+  (`~/.local/bin/herdr`, falling back to PATH lookup) once at load time
+  instead of trusting `PATH`. Verified: the hidden client now stays alive
+  under a real resize instead of exiting within the same millisecond it
+  spawned.
+
+Both fixes were necessary — `allow_nested` alone wasn't sufficient (the
+PATH bug would have kept killing it regardless), and the PATH fix alone
+wouldn't have helped either (nested rejection would have kicked in next).
+Not yet re-verified from Skip's actual phone that this resolves the
+horizontal-scroll complaint end to end — that's the next thing to check.
+`shrinkToFit()`'s guard (`if (fontSize) return`, which fully disables the
+font-safety-net once a size is manually chosen) is still a latent
+secondary issue noted from the original diagnosis, deliberately left
+alone for now since the primary fix may make it moot — revisit only if
+scrolling persists after this.
+
 Source: https://github.com/eyalev/herdr-web, cloned into this dir 2026-08-20.
 Upstream is MIT, single dev, small (~3,050 lines total: `server.js` (409) +
 `lib/*.js` (~950) + `public/index.html` (1,695, single file, no build step,
