@@ -1408,10 +1408,18 @@ $('ns-create').addEventListener('click', async () => {
 });
 
 // Returning to the app while viewing a finished pane counts as seeing it.
+// Also unconditionally re-fit: another attached client (e.g. a real herdr
+// TUI on the desktop) can reclaim the runtime's shared size while this
+// tab was backgrounded, and the WS connection often stays alive the whole
+// time (no reconnect, so sendFit() never fires on its own) -- this is the
+// one moment that reliably means "the phone is looking at this again",
+// so force the same always-resize call that ws.onopen already does rather
+// than trust drift-detection heuristics to catch it.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (activePane) markSeen(activePane);
     if (atBottom) pinBottom();
+    sendFit();
   }
 });
 
