@@ -19,6 +19,16 @@ if [ ! -d "$ROOT/node_modules/express" ]; then
   (cd "$ROOT" && npm install --no-fund --no-audit)
 fi
 
+# VAPID push keys, same /etc/homelab/[service].env pattern as every other
+# homelab service secret — see lib/push.js. Push is simply disabled if this
+# isn't provisioned yet (no auto-generated key material).
+if [ -f /etc/homelab/herdr-web.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /etc/homelab/herdr-web.env
+  set +a
+fi
+
 setsid nohup node "$ROOT/server.js" >> "$STATE_DIR/server.log" 2>&1 < /dev/null &
 echo $! > "$STATE_DIR/server.pid"
 

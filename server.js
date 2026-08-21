@@ -456,7 +456,8 @@ wss.on('connection', (ws) => {
 (async () => {
   const pong = await herdr.ensureServer();
   jlog('info', 'herdr-ready', { version: pong.version, protocol: pong.protocol });
-  push.ensureVapid(VAPID_SUBJECT); // generates+persists a keypair on first run; never logged
+  const vapidKey = push.ensureVapid(VAPID_SUBJECT);
+  jlog('info', vapidKey ? 'push-enabled' : 'push-disabled', vapidKey ? {} : { reason: 'HERDR_WEB_VAPID_PUBLIC_KEY/PRIVATE_KEY not set — see /etc/homelab/herdr-web.env' });
   await refreshSnapshot('startup');
   server.listen(PORT, BIND, () => jlog('info', 'listening', { port: PORT, bind: BIND }));
 })().catch((e) => {
