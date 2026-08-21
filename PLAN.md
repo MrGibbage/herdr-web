@@ -228,7 +228,18 @@ earlier in this plan — that's the real remaining test.
 Pushed to `git@github.com:MrGibbage/herdr-web.git` (origin); `upstream`
 remote kept pointed at `eyalev/herdr-web` for pulling future updates.
 
-## Blocker found: docker-server has no local Tailscale client (2026-08-21)
+## Resolved: Tailscale reinstalled on docker-server (2026-08-21)
+
+Skip chose to reinstall (scoped exception to the 2026-08-12 removal, made
+deliberately rather than by default). `apt` still had the Tailscale
+archive keyring/repo from before, so it was a clean `apt-get install
+tailscale` + `tailscale up` — authenticated via the login link Skip
+opened himself. Now on the tailnet as `docker-server` (100.64.16.10).
+`tailscale serve --bg --https=17930 http://127.0.0.1:7930` is running;
+verified `https://docker-server.tail5687.ts.net:17930/` returns 200. This
+is the phone URL — Skip's Pixel 9 Pro XL is already on the same tailnet.
+
+## Blocker found: docker-server has no local Tailscale client (2026-08-21) — superseded above
 
 The whole exposure plan assumed `tailscale serve` on docker-server, per
 upstream's README. Checked directly: no `tailscale` binary, no
