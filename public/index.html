@@ -928,9 +928,18 @@ $('toast').addEventListener('click', () => {
 });
 // System notifications need permission from a user gesture; ask lazily on
 // pane taps until answered (no latch — a suppressed prompt would eat it).
+// Also retries the push subscription on every tap when permission is
+// already granted — ensurePushSubscription() is idempotent (the browser
+// returns the existing subscription if there is one), so this is what
+// self-heals a subscribe that failed earlier (e.g. VAPID keys not loaded
+// yet server-side at grant time) without waiting for a page reload.
 function maybeAskNotifPermission() {
-  if (!('Notification' in window) || Notification.permission !== 'default') return;
-  Notification.requestPermission().then((p) => { if (p === 'granted') ensurePushSubscription(); }).catch(() => {});
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().then((p) => { if (p === 'granted') ensurePushSubscription(); }).catch(() => {});
+  } else if (Notification.permission === 'granted') {
+    ensurePushSubscription();
+  }
 }
 
 // Real push (app fully closed) needs a server-known subscription on top of
