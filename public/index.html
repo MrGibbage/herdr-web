@@ -731,6 +731,18 @@ function fetchHistSoon(delay = 1500) {
   }, delay);
 }
 
+// TEMP diagnostic overlay for the vertical-scroll bug report — remove once
+// root-caused. Shows the numbers needed to tell "nothing to scroll into"
+// apart from "something's blocking scroll despite real overflow".
+let debugEl = null;
+function debugScroll() {
+  if (!debugEl) {
+    debugEl = document.createElement('div');
+    debugEl.style.cssText = 'position:fixed;top:2px;left:2px;z-index:9999;background:#000c;color:#0f0;font:10px monospace;padding:3px 5px;pointer-events:none;white-space:pre;';
+    document.body.appendChild(debugEl);
+  }
+  debugEl.textContent = `sH=${term.scrollHeight} cH=${term.clientHeight} scrollTop=${term.scrollTop} hist=${histEl.children.length} live=${liveEl.children.length} fitCols=${fitCols}`;
+}
 function onScreen(rows) {
   liveRows = rows;
   renderInto(liveEl, rows);
@@ -747,6 +759,7 @@ function onScreen(rows) {
   }
   fitFont();
   if (atBottom) pinBottom();
+  debugScroll(); // TEMP — remove once the vertical-scroll bug is diagnosed
   // This screen is the first one drawn at the new width, so the cached history
   // above it is wrapped for the old one: re-read it now, whether or not we are
   // pinned at the bottom.
@@ -1419,7 +1432,13 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (activePane) markSeen(activePane);
     if (atBottom) pinBottom();
+    // A single immediate call isn't reliable in practice: if the WS was
+    // silently stalled (not fully closed, so no onclose/reconnect ever
+    // fires) rather than reconnected, wsOk can still read false for a
+    // moment right as the tab wakes up. Retry once shortly after so a
+    // transient false doesn't just silently no-op the whole re-fit.
     sendFit();
+    setTimeout(sendFit, 600);
   }
 });
 
