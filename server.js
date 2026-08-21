@@ -167,6 +167,7 @@ function maybeNotify(data) {
   const title = agent ? `${agent} needs you` : 'Agent needs you';
   const body = ws?.label ? `${ws.label} — blocked, waiting on approval` : 'Blocked, waiting on approval';
   push.notifyAll({ title, body, pane: pane_id })
+    .then((r) => jlog('info', 'push-sent', { pane: pane_id, ...r }))
     .catch((e) => jlog('error', 'push-failed', { pane: pane_id, error: e.message }));
 }
 
