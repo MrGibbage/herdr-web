@@ -741,7 +741,8 @@ function debugScroll() {
     debugEl.style.cssText = 'position:fixed;top:2px;left:2px;z-index:9999;background:#000c;color:#0f0;font:10px monospace;padding:3px 5px;pointer-events:none;white-space:pre;';
     document.body.appendChild(debugEl);
   }
-  debugEl.textContent = `sH=${term.scrollHeight} cH=${term.clientHeight} scrollTop=${term.scrollTop} hist=${histEl.children.length} live=${liveEl.children.length} fitCols=${fitCols} atBottom=${atBottom} recent=${lastRecent ? lastRecent.length : 'null'}`;
+  debugEl.textContent = `sh=${term.scrollHeight} ch=${term.clientHeight} top=${Math.round(term.scrollTop)} bot=${atBottom}\n`
+    + `hist=${histEl.children.length} live=${liveEl.children.length} fit=${fitCols} rec=${lastRecent ? lastRecent.length : 'null'}`;
 }
 function onScreen(rows) {
   liveRows = rows;
