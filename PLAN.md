@@ -111,6 +111,45 @@ reloading in between, to exercise this exact path).
 Still open: the vertical-scroll-didn't-move report from the same test
 session — not yet root-caused at all.
 
+## Round 3: the drift-detection fix was itself the bug (2026-08-21, same day)
+
+Skip retested: refresh now mostly fixes left-right wrapping (progress),
+but vertical scroll got *worse* — "can scroll up a bit, see a couple of
+messages, then it usually gets stuck" at the bottom. He sent two phone
+screenshots (desktop-focused vs. phone-focused) with the temporary debug
+overlay visible:
+
+- Both showed `fitCols=0` — 16 seconds apart.
+- Both showed real overflow (`sH` well above `cH` in both), ruling out
+  "nothing to scroll into" as the explanation.
+- Server logs showed the exact same size (53×37) being respawned several
+  times within under a second, repeatedly, over minutes.
+
+Root cause: **the "Round 2" client-side drift-detection heuristic from
+directly above was itself broken and actively harmful.** It compared
+`screenW(rows)` (the widest *currently visible* line) against `fitCols`
+and reset the cache on any mismatch — but ordinary short lines routinely
+measure narrower than the real column count, so it was constantly
+"detecting drift" that wasn't real. That defeated `negotiateCols()`'s own
+throttle and triggered a fresh kill+respawn of the hidden client on
+nearly every screen update (every ~300ms poll). A respawn storm several
+times a second means the runtime never settles, each one sets
+`awaitingRewrap` and refetches scrollback, and scroll-position math
+running that often has plenty of chances to fight a mid-gesture scroll —
+very likely explaining the "scrolls a bit then snaps back" symptom
+directly, not a separate bug.
+
+**Removed the heuristic entirely.** `visibilitychange` → `sendFit()`
+(with its 600ms retry) is the correct fix for the actual scenario it was
+trying to solve, and fires once on a real event rather than continuously
+on every poll — it doesn't share this failure mode. Temporary debug
+overlay (`sH`/`cH`/`scrollTop`/`hist`/`live`/`fitCols`, top-left corner)
+left in place for one more round of verification.
+
+Not yet re-verified: whether removing the storm fixes vertical scroll,
+and whether `visibilitychange` alone (without the removed heuristic) is
+sufficient for the desktop→phone re-wrap case.
+
 Source: https://github.com/eyalev/herdr-web, cloned into this dir 2026-08-20.
 Upstream is MIT, single dev, small (~3,050 lines total: `server.js` (409) +
 `lib/*.js` (~950) + `public/index.html` (1,695, single file, no build step,
