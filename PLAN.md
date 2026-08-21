@@ -91,11 +91,25 @@ takes over and **stays stuck wide** even after the competitor dies
 auto-reverted) → re-request narrow → back to 42, confirmed via `herdr
 pane layout`, no leaked processes.
 
-**Not yet re-verified from Skip's actual phone.** Also still open: the
-vertical-scroll-didn't-move report from the same test session — not yet
-root-caused, and may or may not be related to the mid-transition wrapped
-state at the time. Ask Skip to retest both after this fix, since fixing
-the width issue may change what's observable about the scroll issue too.
+**Retested on the real phone — still broken.** The synthetic repro above
+only exercised the server-side fix (a raw script sending WS messages
+directly bypasses all of index.html's client-side state entirely). The
+real gap: `sendFit()` — the same always-resize-no-questions-asked
+function that runs on WS reconnect (`ws.onopen`) — never got called on
+the actual "coming back to the phone" moment, because the WS connection
+typically stays alive across a brief backgrounding (no reconnect, so
+`ws.onopen` never re-fires). There was already a `visibilitychange`
+listener for exactly that moment, but it only did `markSeen()`/
+`pinBottom()`. Added a `sendFit()` call there directly — deterministic,
+not a heuristic, unlike the `onScreen()` drift-detection fix above (which
+depends on the currently visible content happening to contain a
+full-width row to notice anything changed — real but insufficient alone).
+Not yet re-verified on the phone (requires a page reload to pick up the
+new JS, then testing "switch to desktop, back to phone" without
+reloading in between, to exercise this exact path).
+
+Still open: the vertical-scroll-didn't-move report from the same test
+session — not yet root-caused at all.
 
 Source: https://github.com/eyalev/herdr-web, cloned into this dir 2026-08-20.
 Upstream is MIT, single dev, small (~3,050 lines total: `server.js` (409) +
