@@ -741,7 +741,7 @@ function debugScroll() {
     debugEl.style.cssText = 'position:fixed;top:2px;left:2px;z-index:9999;background:#000c;color:#0f0;font:10px monospace;padding:3px 5px;pointer-events:none;white-space:pre;';
     document.body.appendChild(debugEl);
   }
-  debugEl.textContent = `sH=${term.scrollHeight} cH=${term.clientHeight} scrollTop=${term.scrollTop} hist=${histEl.children.length} live=${liveEl.children.length} fitCols=${fitCols}`;
+  debugEl.textContent = `sH=${term.scrollHeight} cH=${term.clientHeight} scrollTop=${term.scrollTop} hist=${histEl.children.length} live=${liveEl.children.length} fitCols=${fitCols} atBottom=${atBottom} recent=${lastRecent ? lastRecent.length : 'null'}`;
 }
 function onScreen(rows) {
   liveRows = rows;
@@ -770,6 +770,7 @@ function onScreen(rows) {
 }
 
 term.addEventListener('scroll', () => {
+  debugScroll(); // TEMP — update live on every scroll tick, not just on new content
   const nowAtBottom = term.scrollTop + term.clientHeight >= term.scrollHeight - 8;
   if (nowAtBottom === atBottom) return;
   atBottom = nowAtBottom;
